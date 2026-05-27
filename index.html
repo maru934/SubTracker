@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SubTracker - サブスク管理</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <header>
+    <div class="header-brand">🌙 SubTracker</div>
+    <div class="header-stats">
+      <div class="stat">
+        <span class="stat-label">月額合計</span>
+        <span class="stat-value" id="total-amount">¥0</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">件数</span>
+        <span class="stat-value" id="sub-count">0件</span>
+      </div>
+    </div>
+    <button class="btn-add" id="btn-add-header">＋ 追加</button>
+  </header>
+
+  <div class="alert-banner" id="alert-banner">
+    <span id="alert-text"></span>
+  </div>
+
+  <nav class="tabs">
+    <button class="tab active" onclick="switchTab('list')">一覧</button>
+    <button class="tab" onclick="switchTab('calendar')">カレンダー</button>
+  </nav>
+
+  <main>
+    <section id="view-list" class="view active">
+      <div id="sub-list" class="sub-list"></div>
+      <div class="empty-state" id="empty-state">
+        <div class="empty-icon">📋</div>
+        <p>サブスクがまだ登録されていません</p>
+        <button id="btn-add-empty">＋ 最初のサブスクを追加</button>
+      </div>
+    </section>
+
+    <section id="view-calendar" class="view">
+      <div class="calendar-header">
+        <button id="btn-prev-month">‹</button>
+        <span id="calendar-title"></span>
+        <button id="btn-next-month">›</button>
+      </div>
+      <div class="calendar-grid">
+        <div class="day-header sun">日</div>
+        <div class="day-header">月</div>
+        <div class="day-header">火</div>
+        <div class="day-header">水</div>
+        <div class="day-header">木</div>
+        <div class="day-header">金</div>
+        <div class="day-header sat">土</div>
+      </div>
+      <div id="calendar-days" class="calendar-days"></div>
+    </section>
+  </main>
+
+  <div class="modal-overlay" id="modal-overlay">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 id="modal-title">サブスクを追加</h2>
+        <button class="modal-close" id="btn-modal-close">×</button>
+      </div>
+      <form id="sub-form">
+        <div class="form-group">
+          <label for="f-name">サービス名</label>
+          <input type="text" id="f-name" placeholder="Netflix" required autocomplete="off">
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="f-amount">金額（円/月）</label>
+            <input type="number" id="f-amount" placeholder="1490" min="0" required>
+          </div>
+          <div class="form-group">
+            <label for="f-category">カテゴリ</label>
+            <select id="f-category">
+              <option>動画</option>
+              <option>音楽</option>
+              <option>ソフトウェア</option>
+              <option>ゲーム</option>
+              <option>クラウド</option>
+              <option>その他</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="f-renewal">次回更新日</label>
+          <input type="date" id="f-renewal" required>
+        </div>
+        <div class="form-group">
+          <label for="f-memo">メモ（任意）</label>
+          <input type="text" id="f-memo" placeholder="無料トライアル期間中...">
+        </div>
+        <div class="modal-actions">
+          <button type="button" id="btn-cancel">キャンセル</button>
+          <button type="submit" class="btn-save">保存</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

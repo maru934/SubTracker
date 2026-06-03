@@ -485,12 +485,123 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 .btn-save:hover { background: var(--accent-h); }
 
 /* ── Responsive ───────────────────────── */
+
+/* Smooth tap feedback */
+button, input, select {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
 @media (max-width: 580px) {
-  header { gap: 0.75rem; padding: 0.75rem 1rem; }
-  .header-stats { gap: 1rem; }
+  /* Header: brand + add button on top, stats below */
+  header {
+    flex-wrap: wrap;
+    gap: 0.4rem 0.75rem;
+    padding: 0.65rem 1rem;
+  }
+
+  .header-brand { font-size: 1rem; }
+
+  .header-stats {
+    order: 3;
+    width: 100%;
+    gap: 1.5rem;
+  }
+
+  .btn-add {
+    margin-left: auto;
+    padding: 0.45rem 0.9rem;
+    font-size: 0.85rem;
+  }
+
   .stat-value { font-size: 1rem; }
+
+  /* Tabs: full-width */
+  .tabs { padding: 0; }
+  .tab { flex: 1; text-align: center; padding: 0.75rem 0; }
+
   main { padding: 1rem; }
+
+  /* Cards */
   .sub-list { grid-template-columns: 1fr; }
+
+  /* Larger touch targets for card actions */
+  .btn-edit,
+  .btn-delete {
+    padding: 0.5rem 1rem;
+    font-size: 0.85rem;
+  }
+
+  /* Form */
   .form-row { grid-template-columns: 1fr; }
-  .calendar-day { min-height: 56px; }
+
+  /* Prevent iOS auto-zoom on input focus */
+  .form-group input,
+  .form-group select {
+    font-size: 1rem;
+  }
+
+  /* Modal: bottom sheet */
+  .modal-overlay { align-items: flex-end; }
+
+  .modal {
+    width: 100%;
+    max-width: 100%;
+    max-height: 92vh;
+    overflow-y: auto;
+    border-radius: 20px 20px 0 0;
+    padding: 1.25rem 1.25rem calc(1.25rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  @keyframes modalIn {
+    from { transform: translateY(20px); opacity: 0; }
+    to   { transform: translateY(0);    opacity: 1; }
+  }
+
+  /* Modal actions: full-width buttons */
+  .modal-actions {
+    flex-direction: column-reverse;
+    gap: 0.5rem;
+  }
+
+  .modal-actions button {
+    width: 100%;
+    padding: 0.75rem;
+    font-size: 0.95rem;
+  }
+
+  /* Calendar */
+  .calendar-day { min-height: 60px; }
+  .cal-event { font-size: 0.6rem; }
+}
+
+/* Very small screens */
+@media (max-width: 380px) {
+  .calendar-day {
+    min-height: 46px;
+    padding: 0.3rem 0.2rem;
+  }
+
+  .day-num { font-size: 0.72rem; }
+
+  /* Show dot instead of full label to save space */
+  .cal-event {
+    font-size: 0;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    padding: 0;
+    margin: 1px auto;
+  }
+
+  .card-amount { font-size: 1.35rem; }
+}
+
+/* Notched / safe-area devices */
+@supports (padding: env(safe-area-inset-top)) {
+  header {
+    padding-top: max(0.65rem, env(safe-area-inset-top));
+    padding-left: max(1rem, env(safe-area-inset-left));
+    padding-right: max(1rem, env(safe-area-inset-right));
+  }
 }

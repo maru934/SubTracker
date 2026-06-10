@@ -380,6 +380,48 @@ function renderCalendar() {
   }
 
   document.getElementById('calendar-days').innerHTML = parts.join('');
+
+  renderCalendarSummary(map);
+}
+
+function renderCalendarSummary(map) {
+  const summaryEl = document.getElementById('calendar-summary');
+  const title = `${calYear}年${calMonth + 1}月の支払い予定`;
+
+  const items = [];
+  Object.keys(map)
+    .map(Number)
+    .sort((a, b) => a - b)
+    .forEach(day => map[day].forEach(s => items.push({ s, day })));
+
+  if (items.length === 0) {
+    summaryEl.innerHTML = `
+      <div class="cal-summary-head">
+        <h3 class="cal-summary-title">${title}</h3>
+      </div>
+      <p class="cal-summary-empty">この月の更新予定はありません</p>`;
+    return;
+  }
+
+  const total = items.reduce((sum, { s }) => sum + (Number(s.amount) || 0), 0);
+
+  summaryEl.innerHTML = `
+    <div class="cal-summary-head">
+      <h3 class="cal-summary-title">${title}</h3>
+      <div class="cal-summary-total">${yen(total)} <span class="cal-summary-count">(${items.length}件)</span></div>
+    </div>
+    <ul class="cal-summary-list">
+      ${items.map(({ s, day }) => {
+        const cycleLabel = CYCLE_LABEL[s.cycle] || '月';
+        return `
+          <li class="cal-summary-item">
+            <span class="cal-summary-date">${day}日</span>
+            <span class="cal-summary-name">${esc(s.name)}</span>
+            <span class="cal-summary-cat">${esc(s.category)}</span>
+            <span class="cal-summary-amount">${yen(s.amount)}<small> / ${cycleLabel}</small></span>
+          </li>`;
+      }).join('')}
+    </ul>`;
 }
 
 // ── Evaluation tab ───────────────────────

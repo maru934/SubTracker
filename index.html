@@ -13,42 +13,74 @@
     <div class="header-stats">
       <div class="stat">
         <span class="stat-label">月額合計</span>
-        <span class="stat-value" id="total-amount">¥0</span>
+        <span class="stat-value" id="total-monthly">¥0</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">年額合計</span>
+        <span class="stat-value" id="total-yearly">¥0</span>
       </div>
       <div class="stat">
         <span class="stat-label">件数</span>
         <span class="stat-value" id="sub-count">0件</span>
       </div>
     </div>
-    <button class="btn-add" id="btn-add-header">＋ 追加</button>
+    <button type="button" class="btn-add" id="btn-add-header">＋ 追加</button>
   </header>
 
-  <div class="alert-banner" id="alert-banner">
+  <div class="alert-banner" id="alert-banner" role="status" aria-live="polite">
     <span id="alert-text"></span>
   </div>
 
-  <nav class="tabs">
-    <button class="tab active" onclick="switchTab('list')">一覧</button>
-    <button class="tab" onclick="switchTab('calendar')">カレンダー</button>
+  <nav class="tabs" role="tablist" aria-label="ビュー切替">
+    <button type="button" class="tab active" role="tab" id="tab-list"
+            aria-selected="true" aria-controls="view-list" data-tab="list">ホーム</button>
+    <button type="button" class="tab" role="tab" id="tab-calendar"
+            aria-selected="false" aria-controls="view-calendar" tabindex="-1" data-tab="calendar">カレンダー</button>
+    <button type="button" class="tab" role="tab" id="tab-eval"
+            aria-selected="false" aria-controls="view-eval" tabindex="-1" data-tab="eval">評価</button>
   </nav>
 
   <main>
-    <section id="view-list" class="view active">
+    <section id="view-list" class="view active" role="tabpanel" aria-labelledby="tab-list">
+      <div class="home-summary">
+        <div class="summary-card">
+          <div class="summary-label">今月の支払い予定</div>
+          <div class="summary-value" id="summary-this-month">¥0</div>
+          <div class="summary-sub" id="summary-this-month-count">0件</div>
+        </div>
+        <div class="summary-card">
+          <div class="summary-label">年間換算</div>
+          <div class="summary-value" id="summary-yearly">¥0</div>
+          <div class="summary-sub" id="summary-monthly-equiv">月額換算 ¥0</div>
+        </div>
+      </div>
+      <div class="list-toolbar">
+        <input type="search" id="search" placeholder="🔍 検索（名前・メモ）" autocomplete="off" aria-label="検索">
+        <select id="filter-category" aria-label="カテゴリで絞り込み">
+          <option value="">全カテゴリ</option>
+          <option>動画</option>
+          <option>音楽</option>
+          <option>ソフトウェア</option>
+          <option>ゲーム</option>
+          <option>クラウド</option>
+          <option>その他</option>
+        </select>
+      </div>
       <div id="sub-list" class="sub-list"></div>
       <div class="empty-state" id="empty-state">
         <div class="empty-icon">📋</div>
-        <p>サブスクがまだ登録されていません</p>
-        <button id="btn-add-empty">＋ 最初のサブスクを追加</button>
+        <p id="empty-text">サブスクがまだ登録されていません</p>
+        <button type="button" id="btn-add-empty">＋ 最初のサブスクを追加</button>
       </div>
     </section>
 
-    <section id="view-calendar" class="view">
+    <section id="view-calendar" class="view" role="tabpanel" aria-labelledby="tab-calendar">
       <div class="calendar-header">
-        <button id="btn-prev-month">‹</button>
+        <button type="button" id="btn-prev-month" aria-label="前月">‹</button>
         <span id="calendar-title"></span>
-        <button id="btn-next-month">›</button>
+        <button type="button" id="btn-next-month" aria-label="翌月">›</button>
       </div>
-      <div class="calendar-grid">
+      <div class="calendar-grid" aria-hidden="true">
         <div class="day-header sun">日</div>
         <div class="day-header">月</div>
         <div class="day-header">火</div>
@@ -59,24 +91,46 @@
       </div>
       <div id="calendar-days" class="calendar-days"></div>
     </section>
+
+    <section id="view-eval" class="view" role="tabpanel" aria-labelledby="tab-eval">
+      <div id="eval-pending"></div>
+      <div id="eval-history"></div>
+    </section>
   </main>
 
-  <div class="modal-overlay" id="modal-overlay">
+  <footer class="app-footer">
+    <button type="button" id="btn-export" class="btn-text">📤 エクスポート</button>
+    <button type="button" id="btn-import" class="btn-text">📥 インポート</button>
+    <input type="file" id="file-import" accept="application/json" hidden>
+  </footer>
+
+  <!-- Add/Edit modal -->
+  <div class="modal-overlay" id="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="modal-title">
     <div class="modal">
       <div class="modal-header">
         <h2 id="modal-title">サブスクを追加</h2>
-        <button class="modal-close" id="btn-modal-close">×</button>
+        <button type="button" class="modal-close" id="btn-modal-close" aria-label="閉じる">×</button>
       </div>
-      <form id="sub-form">
+      <form id="sub-form" novalidate>
         <div class="form-group">
           <label for="f-name">サービス名</label>
-          <input type="text" id="f-name" placeholder="Netflix" required autocomplete="off">
+          <input type="text" id="f-name" placeholder="Netflix" required autocomplete="off" maxlength="60">
         </div>
         <div class="form-row">
           <div class="form-group">
-            <label for="f-amount">金額（円/月）</label>
-            <input type="number" id="f-amount" placeholder="1490" min="0" required>
+            <label for="f-amount">金額（円）</label>
+            <input type="number" id="f-amount" placeholder="1490" min="1" max="9999999" required inputmode="numeric">
           </div>
+          <div class="form-group">
+            <label for="f-cycle">課金サイクル</label>
+            <select id="f-cycle">
+              <option value="monthly">月額</option>
+              <option value="yearly">年額</option>
+              <option value="weekly">週額</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
           <div class="form-group">
             <label for="f-category">カテゴリ</label>
             <select id="f-category">
@@ -88,14 +142,14 @@
               <option>その他</option>
             </select>
           </div>
-        </div>
-        <div class="form-group">
-          <label for="f-renewal">次回更新日</label>
-          <input type="date" id="f-renewal" required>
+          <div class="form-group">
+            <label for="f-renewal">次回更新日</label>
+            <input type="date" id="f-renewal" required>
+          </div>
         </div>
         <div class="form-group">
           <label for="f-memo">メモ（任意）</label>
-          <input type="text" id="f-memo" placeholder="無料トライアル期間中...">
+          <input type="text" id="f-memo" placeholder="無料トライアル期間中..." maxlength="120">
         </div>
         <div class="modal-actions">
           <button type="button" id="btn-cancel">キャンセル</button>
@@ -103,6 +157,24 @@
         </div>
       </form>
     </div>
+  </div>
+
+  <!-- Confirm modal -->
+  <div class="modal-overlay" id="confirm-overlay" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+    <div class="modal modal-confirm">
+      <h2 id="confirm-title">確認</h2>
+      <p id="confirm-text"></p>
+      <div class="modal-actions">
+        <button type="button" id="btn-confirm-cancel">キャンセル</button>
+        <button type="button" id="btn-confirm-ok" class="btn-danger">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden>
+    <span id="toast-text"></span>
+    <button type="button" id="toast-action" class="btn-text" hidden></button>
   </div>
 
   <script src="app.js"></script>

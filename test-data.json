@@ -1,0 +1,76 @@
+{
+  "version": 2,
+  "exportedAt": "2026-06-10",
+  "subs": [
+    {
+      "id": "demo-netflix",
+      "name": "Netflix",
+      "amount": 1490,
+      "cycle": "monthly",
+      "nextRenewal": "2026-06-15",
+      "category": "動画",
+      "memo": "家族プラン",
+      "createdAt": "2025-12-01"
+    },
+    {
+      "id": "demo-spotify",
+      "name": "Spotify",
+      "amount": 980,
+      "cycle": "monthly",
+      "nextRenewal": "2026-06-25",
+      "category": "音楽",
+      "memo": "",
+      "createdAt": "2026-01-10"
+    },
+    {
+      "id": "demo-copilot",
+      "name": "GitHub Copilot",
+      "amount": 1500,
+      "cycle": "monthly",
+      "nextRenewal": "2026-07-05",
+      "category": "ソフトウェア",
+      "memo": "個人プラン",
+      "createdAt": "2026-02-20"
+    },
+    {
+      "id": "demo-disney",
+      "name": "Disney+",
+      "amount": 990,
+      "cycle": "monthly",
+      "nextRenewal": "2026-07-12",
+      "category": "動画",
+      "memo": "",
+      "createdAt": "2025-08-15"
+    },
+    {
+      "id": "demo-adobe",
+      "name": "Adobe Creative Cloud",
+      "amount": 72336,
+      "cycle": "yearly",
+      "nextRenewal": "2026-06-30",
+      "category": "ソフトウェア",
+      "memo": "コンプリートプラン (年額)",
+      "createdAt": "2025-06-30"
+    }
+  ],
+  "ratings": [
+    {
+      "subId": "demo-netflix",
+      "period": "2026-04",
+      "value": "high",
+      "ratedAt": "2026-05-10"
+    },
+    {
+      "subId": "demo-spotify",
+      "period": "2026-04",
+      "value": "mid",
+      "ratedAt": "2026-05-15"
+    },
+    {
+      "subId": "demo-disney",
+      "period": "2026-05",
+      "value": "low",
+      "ratedAt": "2026-06-01"
+    }
+  ]
+}

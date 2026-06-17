@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "exportedAt": "2026-06-10",
+  "exportedAt": "2026-06-17",
   "subs": [
     {
       "id": "demo-netflix",
@@ -39,7 +39,7 @@
       "cycle": "monthly",
       "nextRenewal": "2026-07-12",
       "category": "動画",
-      "memo": "",
+      "memo": "ほぼ見てない…",
       "createdAt": "2025-08-15"
     },
     {
@@ -51,6 +51,27 @@
       "category": "ソフトウェア",
       "memo": "コンプリートプラン (年額)",
       "createdAt": "2025-06-30"
+    },
+    {
+      "id": "demo-claude",
+      "name": "Claude Pro",
+      "amount": 3000,
+      "cycle": "monthly",
+      "nextRenewal": "2026-06-23",
+      "category": "ソフトウェア",
+      "memo": "",
+      "createdAt": "2026-06-10",
+      "trialEndsAt": "2026-06-19"
+    },
+    {
+      "id": "demo-chatgpt",
+      "name": "ChatGPT Plus",
+      "amount": 600,
+      "cycle": "weekly",
+      "nextRenewal": "2026-06-22",
+      "category": "ソフトウェア",
+      "memo": "週払いプラン",
+      "createdAt": "2026-04-01"
     }
   ],
   "ratings": [
@@ -61,6 +82,12 @@
       "ratedAt": "2026-05-10"
     },
     {
+      "subId": "demo-netflix",
+      "period": "2026-05",
+      "value": "high",
+      "ratedAt": "2026-06-05"
+    },
+    {
       "subId": "demo-spotify",
       "period": "2026-04",
       "value": "mid",
@@ -68,9 +95,27 @@
     },
     {
       "subId": "demo-disney",
+      "period": "2026-04",
+      "value": "low",
+      "ratedAt": "2026-05-12"
+    },
+    {
+      "subId": "demo-disney",
       "period": "2026-05",
       "value": "low",
       "ratedAt": "2026-06-01"
+    },
+    {
+      "subId": "demo-copilot",
+      "period": "2026-04",
+      "value": "low",
+      "ratedAt": "2026-05-08"
+    },
+    {
+      "subId": "demo-copilot",
+      "period": "2026-05",
+      "value": "low",
+      "ratedAt": "2026-06-04"
     }
   ]
 }

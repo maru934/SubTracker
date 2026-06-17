@@ -85,12 +85,19 @@ header {
 /* ── Alert ────────────────────────────── */
 .alert-banner {
   display: none;
-  background: var(--danger-bg);
-  border-left: 4px solid var(--danger);
-  color: #fca5a5;
+  background: var(--surface);
+  border-left: 4px solid var(--border);
   padding: 0.7rem 1.5rem;
   font-size: 0.85rem;
 }
+
+.alert-banner.alert-danger  { background: var(--danger-bg);  border-left-color: var(--danger);  }
+.alert-banner.alert-warning { background: var(--warning-bg); border-left-color: var(--warning); }
+
+.alert-line                 { padding: 0.12rem 0; color: var(--text); line-height: 1.5; }
+.alert-line.line-danger     { color: #fecaca; }
+.alert-line.line-warning    { color: #fde68a; }
+.alert-line.line-trial      { color: #bae6fd; }
 
 /* ── Tabs ─────────────────────────────── */
 .tabs {
@@ -158,6 +165,127 @@ main {
   font-size: 0.72rem;
   color: var(--text-muted);
   margin-top: 0.3rem;
+}
+
+/* ── Cancel candidates ────────────────── */
+.cancel-candidates {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.10), rgba(245, 158, 11, 0.08));
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-radius: 14px;
+  padding: 1rem 1.1rem;
+  margin-bottom: 1.25rem;
+}
+
+.cancel-candidates-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 0.85rem;
+  flex-wrap: wrap;
+}
+
+.cancel-candidates-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 0.2rem;
+}
+
+.cancel-candidates-subtitle {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.cancel-candidates-savings { text-align: right; }
+.savings-label  { font-size: 0.66rem; color: var(--text-muted); letter-spacing: 0.05em; }
+.savings-amount { font-size: 1.2rem; font-weight: 800; color: var(--success); }
+
+.cancel-candidate-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.cancel-candidate-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.7rem 0.9rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.cc-name { font-weight: 700; font-size: 0.95rem; }
+.cc-meta { font-size: 0.74rem; color: var(--text-muted); margin-top: 0.15rem; }
+
+.cc-actions { display: flex; gap: 0.4rem; }
+
+/* ── Category breakdown ───────────────── */
+.category-breakdown {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1rem 1.1rem;
+  margin: 1.5rem 0;
+}
+
+.breakdown-title {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 0.85rem;
+}
+
+.breakdown-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.breakdown-row {
+  display: grid;
+  grid-template-columns: 88px 1fr auto;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.breakdown-name {
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.breakdown-bar-bg {
+  background: var(--bg);
+  border-radius: 999px;
+  height: 8px;
+  overflow: hidden;
+}
+
+.breakdown-bar {
+  background: linear-gradient(90deg, var(--accent), #818cf8);
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.2s;
+}
+
+.breakdown-amount {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.breakdown-pct {
+  font-size: 0.7rem;
+  font-weight: 400;
+  color: var(--text-muted);
 }
 
 /* ── List toolbar ─────────────────────── */
@@ -253,6 +381,23 @@ main {
   font-size: 0.72rem;
   color: var(--text-muted);
   margin-bottom: 0.3rem;
+}
+
+.trial-badge {
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 700;
+  background: rgba(56, 189, 248, 0.16);
+  color: #7dd3fc;
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  padding: 0.2rem 0.55rem;
+  border-radius: 6px;
+  margin: 0.15rem 0 0.4rem;
+}
+.trial-badge.trial-urgent {
+  background: rgba(245, 158, 11, 0.18);
+  color: #fde68a;
+  border-color: rgba(245, 158, 11, 0.45);
 }
 
 .card-category {
@@ -913,6 +1058,15 @@ select:focus-visible {
   .eval-buttons      { gap: 0.35rem; }
   .eval-btn          { font-size: 0.72rem; padding: 0.6rem 0.2rem; }
   .eval-emoji        { font-size: 1.25rem; }
+
+  .cancel-candidates-head    { flex-direction: column; gap: 0.5rem; }
+  .cancel-candidates-savings { text-align: left; }
+  .cancel-candidate-card     { flex-direction: column; align-items: stretch; }
+  .cc-actions                { justify-content: flex-end; }
+
+  .breakdown-row             { grid-template-columns: 70px 1fr auto; gap: 0.5rem; }
+  .breakdown-name            { font-size: 0.75rem; }
+  .breakdown-amount          { font-size: 0.78rem; }
 
   .eval-history-item {
     grid-template-columns: 1fr auto;

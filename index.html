@@ -27,9 +27,7 @@
     <button type="button" class="btn-add" id="btn-add-header">＋ 追加</button>
   </header>
 
-  <div class="alert-banner" id="alert-banner" role="status" aria-live="polite">
-    <span id="alert-text"></span>
-  </div>
+  <div class="alert-banner" id="alert-banner" role="status" aria-live="polite"></div>
 
   <nav class="tabs" role="tablist" aria-label="ビュー切替">
     <button type="button" class="tab active" role="tab" id="tab-list"
@@ -42,9 +40,10 @@
 
   <main>
     <section id="view-list" class="view active" role="tabpanel" aria-labelledby="tab-list">
+      <div id="cancel-candidates" class="cancel-candidates" style="display:none"></div>
       <div class="home-summary">
         <div class="summary-card">
-          <div class="summary-label">今月の支払い予定</div>
+          <div class="summary-label">今月の支払い</div>
           <div class="summary-value" id="summary-this-month">¥0</div>
           <div class="summary-sub" id="summary-this-month-count">0件</div>
         </div>
@@ -55,7 +54,7 @@
         </div>
       </div>
       <div class="list-toolbar">
-        <input type="search" id="search" placeholder="🔍 検索（名前・メモ）" autocomplete="off" aria-label="検索">
+        <input type="search" id="search" placeholder="🔍 検索（名前・メモ・カテゴリ）" autocomplete="off" aria-label="検索">
         <select id="filter-category" aria-label="カテゴリで絞り込み">
           <option value="">全カテゴリ</option>
           <option>動画</option>
@@ -95,6 +94,7 @@
 
     <section id="view-eval" class="view" role="tabpanel" aria-labelledby="tab-eval">
       <div id="eval-pending"></div>
+      <div id="category-breakdown" class="category-breakdown" style="display:none"></div>
       <div id="eval-history"></div>
     </section>
   </main>
@@ -149,8 +149,12 @@
           </div>
         </div>
         <div class="form-group">
+          <label for="f-trial">無料トライアル終了日（任意）</label>
+          <input type="date" id="f-trial">
+        </div>
+        <div class="form-group">
           <label for="f-memo">メモ（任意）</label>
-          <input type="text" id="f-memo" placeholder="無料トライアル期間中..." maxlength="120">
+          <input type="text" id="f-memo" placeholder="解約は◯月◯日まで..." maxlength="120">
         </div>
         <div class="modal-actions">
           <button type="button" id="btn-cancel">キャンセル</button>

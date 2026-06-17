@@ -68,15 +68,18 @@ function normalizeSub(s) {
   if (!s.name) return null;
   if (typeof s.nextRenewal !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(s.nextRenewal)) return null;
   const cycle = (s.cycle === 'yearly' || s.cycle === 'weekly') ? s.cycle : 'monthly';
+  const trial = (typeof s.trialEndsAt === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s.trialEndsAt))
+    ? s.trialEndsAt : null;
   return {
-    id:          s.id || uid(),
-    name:        String(s.name).slice(0, 60),
-    amount:      Math.max(0, Number(s.amount) || 0),
+    id:           s.id || uid(),
+    name:         String(s.name).slice(0, 60),
+    amount:       Math.max(0, Number(s.amount) || 0),
     cycle,
-    nextRenewal: s.nextRenewal,
-    category:    CATEGORIES.includes(s.category) ? s.category : 'その他',
-    memo:        s.memo ? String(s.memo).slice(0, 120) : '',
-    createdAt:   s.createdAt || todayISO(),
+    nextRenewal:  s.nextRenewal,
+    category:     CATEGORIES.includes(s.category) ? s.category : 'その他',
+    memo:         s.memo ? String(s.memo).slice(0, 120) : '',
+    createdAt:    s.createdAt || todayISO(),
+    trialEndsAt:  trial,
   };
 }
 
@@ -134,11 +137,52 @@ function advanceCycle(dateStr, cycle) {
   return toYMD(d);
 }
 
+function reverseAdvanceCycle(dateStr, cycle) {
+  const d = parseYMD(dateStr);
+  if (cycle === 'weekly') {
+    d.setDate(d.getDate() - 7);
+  } else if (cycle === 'yearly') {
+    d.setFullYear(d.getFullYear() - 1);
+  } else {
+    const day = d.getDate();
+    d.setDate(1);
+    d.setMonth(d.getMonth() - 1);
+    const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+    d.setDate(Math.min(day, lastDay));
+  }
+  return toYMD(d);
+}
+
+// Enumerate all billing dates for a subscription that fall in a given calendar month.
+// Walks back from nextRenewal so works for weekly (multi/month), monthly, yearly.
+function billingsInMonth(s, year, month) {
+  const mm = String(month + 1).padStart(2, '0');
+  const lastDay = new Date(year, month + 1, 0).getDate();
+  const monthStart = `${year}-${mm}-01`;
+  const monthEnd   = `${year}-${mm}-${String(lastDay).padStart(2, '0')}`;
+  const out = [];
+  let d = s.nextRenewal;
+  let safety = 0;
+  while (d > monthEnd && safety++ < 2000) {
+    d = reverseAdvanceCycle(d, s.cycle);
+  }
+  while (d >= monthStart && safety++ < 2000) {
+    out.push(d);
+    d = reverseAdvanceCycle(d, s.cycle);
+  }
+  return out.sort();
+}
+
 function monthlyEquivalent(s) {
   const a = Number(s.amount) || 0;
   if (s.cycle === 'yearly') return a / 12;
   if (s.cycle === 'weekly') return a * 52 / 12;
   return a;
+}
+
+function isInTrial(s) {
+  if (!s.trialEndsAt) return false;
+  return s.trialEndsAt >= todayISO();
 }
 
 // ── Rating period helpers ────────────────
@@ -162,6 +206,9 @@ function findRating(subId, period) {
 function shouldShowEval(s, period) {
   const [y, m] = period.split('-').map(Number);
   const periodStart = new Date(y, m - 1, 1);
+  const periodEnd   = new Date(y, m, 0); // last day of the period month
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  if (today <= periodEnd) return false; // period not yet finished
   const created = parseYMD(s.createdAt);
   return created <= periodStart;
 }
@@ -212,30 +259,131 @@ function render() {
   renderHeader();
   renderSummary();
   renderAlert();
+  renderCancelCandidates();
   renderList();
   renderCalendar();
   renderEval();
+  renderCategoryBreakdown();
+}
+
+function getCancelCandidates() {
+  return subs.map(s => {
+    const rs = ratings
+      .filter(r => r.subId === s.id)
+      .sort((a, b) => b.period.localeCompare(a.period));
+    if (rs.length < 2) return null;
+    const recent   = rs.slice(0, 3);
+    const lowCount = recent.filter(r => r.value === 'low').length;
+    if (lowCount < 2) return null;
+    return { sub: s, lowCount, recentLength: recent.length };
+  }).filter(Boolean)
+    .sort((a, b) => monthlyEquivalent(b.sub) - monthlyEquivalent(a.sub));
+}
+
+function renderCancelCandidates() {
+  const el = document.getElementById('cancel-candidates');
+  if (!el) return;
+  const candidates = getCancelCandidates();
+  if (candidates.length === 0) {
+    el.innerHTML = '';
+    el.style.display = 'none';
+    return;
+  }
+  el.style.display = '';
+  const savings = candidates.reduce((sum, c) => sum + monthlyEquivalent(c.sub) * 12, 0);
+
+  el.innerHTML = `
+    <div class="cancel-candidates-head">
+      <div class="cancel-candidates-titlebox">
+        <h3 class="cancel-candidates-title">💸 解約候補（${candidates.length}件）</h3>
+        <p class="cancel-candidates-subtitle">最近の評価で「👎ほぼ使わず」が続いています</p>
+      </div>
+      <div class="cancel-candidates-savings">
+        <div class="savings-label">解約で年間節約</div>
+        <div class="savings-amount">${yen(savings)}</div>
+      </div>
+    </div>
+    <div class="cancel-candidate-list">
+      ${candidates.map(({ sub, lowCount, recentLength }) => `
+        <div class="cancel-candidate-card">
+          <div class="cc-info">
+            <div class="cc-name">${esc(sub.name)}</div>
+            <div class="cc-meta">月額換算 ${yen(monthlyEquivalent(sub))}・直近${recentLength}回中 👎${lowCount}回</div>
+          </div>
+          <div class="cc-actions">
+            <button type="button" class="btn-edit"   data-id="${sub.id}">編集</button>
+            <button type="button" class="btn-delete" data-id="${sub.id}">解約</button>
+          </div>
+        </div>
+      `).join('')}
+    </div>`;
+}
+
+function renderCategoryBreakdown() {
+  const el = document.getElementById('category-breakdown');
+  if (!el) return;
+  if (subs.length === 0) {
+    el.innerHTML = '';
+    el.style.display = 'none';
+    return;
+  }
+
+  const byCat = {};
+  CATEGORIES.forEach(c => { byCat[c] = 0; });
+  subs.forEach(s => {
+    byCat[s.category] = (byCat[s.category] || 0) + monthlyEquivalent(s);
+  });
+  const entries = Object.entries(byCat)
+    .filter(([, v]) => v > 0)
+    .sort((a, b) => b[1] - a[1]);
+
+  if (entries.length === 0) {
+    el.innerHTML = '';
+    el.style.display = 'none';
+    return;
+  }
+  el.style.display = '';
+  const max   = entries[0][1];
+  const total = entries.reduce((sum, [, v]) => sum + v, 0);
+
+  el.innerHTML = `
+    <h3 class="breakdown-title">カテゴリ別 月額換算</h3>
+    <div class="breakdown-rows">
+      ${entries.map(([cat, val]) => {
+        const pct      = Math.round((val / total) * 100);
+        const barWidth = Math.max(4, (val / max) * 100);
+        return `
+          <div class="breakdown-row">
+            <div class="breakdown-name">${esc(cat)}</div>
+            <div class="breakdown-bar-bg"><div class="breakdown-bar" style="width: ${barWidth}%"></div></div>
+            <div class="breakdown-amount">${yen(val)} <span class="breakdown-pct">(${pct}%)</span></div>
+          </div>`;
+      }).join('')}
+    </div>`;
 }
 
 function renderSummary() {
   const now = new Date();
   const y = now.getFullYear(), m = now.getMonth();
+  const today = todayISO();
 
-  let thisMonthTotal = 0, thisMonthCount = 0;
+  let total = 0, paid = 0, upcoming = 0;
   subs.forEach(s => {
-    const d = parseYMD(s.nextRenewal);
-    if (d.getFullYear() === y && d.getMonth() === m) {
-      thisMonthTotal += Number(s.amount) || 0;
-      thisMonthCount++;
-    }
+    billingsInMonth(s, y, m).forEach(dateStr => {
+      total += Number(s.amount) || 0;
+      if (dateStr < today) paid++;
+      else upcoming++;
+    });
   });
+  const count = paid + upcoming;
 
   const monthly = subs.reduce((sum, s) => sum + monthlyEquivalent(s), 0);
 
-  document.getElementById('summary-this-month').textContent       = yen(thisMonthTotal);
-  document.getElementById('summary-this-month-count').textContent = `${thisMonthCount}件`;
-  document.getElementById('summary-yearly').textContent           = yen(monthly * 12);
-  document.getElementById('summary-monthly-equiv').textContent    = `月額換算 ${yen(monthly)}`;
+  document.getElementById('summary-this-month').textContent = yen(total);
+  document.getElementById('summary-this-month-count').textContent =
+    count === 0 ? '0件' : `${count}件（支払済 ${paid} / 予定 ${upcoming}）`;
+  document.getElementById('summary-yearly').textContent        = yen(monthly * 12);
+  document.getElementById('summary-monthly-equiv').textContent = `月額換算 ${yen(monthly)}`;
 }
 
 function renderHeader() {
@@ -246,30 +394,61 @@ function renderHeader() {
 }
 
 function renderAlert() {
-  const items = subs
+  const banner = document.getElementById('alert-banner');
+  const lines  = [];
+  let hasDanger = false;
+
+  const renewals = subs
     .map(s => ({ s, d: daysUntil(s.nextRenewal) }))
     .filter(({ d }) => d <= 7)
     .sort((a, b) => a.d - b.d);
 
-  const banner = document.getElementById('alert-banner');
-  if (items.length === 0) {
-    banner.style.display = 'none';
-    return;
+  const overdue  = renewals.filter(x => x.d <  0);
+  const upcoming = renewals.filter(x => x.d >= 0);
+
+  if (overdue.length > 0) {
+    hasDanger = true;
+    const names = overdue.map(({ s, d }) => `${esc(s.name)}（${daysLabel(d)}）`).join('、');
+    lines.push(`<div class="alert-line line-danger">⚠️ 更新期限超過 ${overdue.length}件: ${names}</div>`);
+  }
+  if (upcoming.length > 0) {
+    const names = upcoming.map(({ s, d }) => `${esc(s.name)}（${daysLabel(d)}）`).join('、');
+    lines.push(`<div class="alert-line line-warning">⏰ まもなく更新: ${names}</div>`);
   }
 
-  const overdue = items.filter(x => x.d < 0).length;
-  const prefix  = overdue > 0 ? `⚠️ 更新期限超過 ${overdue}件 / ` : '⚠️ まもなく更新: ';
-  const names   = items.map(({ s, d }) => `${s.name}（${daysLabel(d)}）`).join('、');
-  document.getElementById('alert-text').textContent = prefix + names;
+  const trials = subs
+    .filter(s => s.trialEndsAt)
+    .map(s => ({ s, d: daysUntil(s.trialEndsAt) }))
+    .filter(({ d }) => d >= 0 && d <= 7)
+    .sort((a, b) => a.d - b.d);
+
+  if (trials.length > 0) {
+    const names = trials.map(({ s, d }) => `${esc(s.name)}（${d === 0 ? '本日終了' : 'あと' + d + '日'}）`).join('、');
+    lines.push(`<div class="alert-line line-trial">🆓 トライアル終了間近: ${names}</div>`);
+  }
+
+  banner.classList.remove('alert-danger', 'alert-warning');
+  if (lines.length === 0) {
+    banner.style.display = 'none';
+    banner.innerHTML = '';
+    return;
+  }
+  banner.classList.add(hasDanger ? 'alert-danger' : 'alert-warning');
   banner.style.display = 'block';
+  banner.innerHTML = lines.join('');
 }
 
 function getVisibleSubs() {
   const q = searchQuery.trim().toLowerCase();
   return subs.filter(s => {
     if (filterCategory && s.category !== filterCategory) return false;
-    if (q && !s.name.toLowerCase().includes(q) && !(s.memo || '').toLowerCase().includes(q)) return false;
-    return true;
+    if (!q) return true;
+    const hay = [
+      s.name,
+      s.memo || '',
+      s.category || '',
+    ].join(' ').toLowerCase();
+    return hay.includes(q);
   });
 }
 
@@ -308,6 +487,13 @@ function renderList() {
     const equiv      = s.cycle !== 'monthly'
       ? `<div class="card-equiv">≈ ${yen(monthlyEquivalent(s))} / 月</div>`
       : '';
+    let trial = '';
+    if (isInTrial(s)) {
+      const td = daysUntil(s.trialEndsAt);
+      const urgent = td <= 3 ? ' trial-urgent' : '';
+      const label = td === 0 ? '🆓 本日トライアル終了' : `🆓 トライアル中（あと${td}日）`;
+      trial = `<div class="trial-badge${urgent}">${label}</div>`;
+    }
     return `
       <div class="sub-card ${cardClass(d)}">
         <div class="card-top">
@@ -316,6 +502,7 @@ function renderList() {
         </div>
         <div class="card-amount">${yen(s.amount)}<small> / ${cycleLabel}</small></div>
         ${equiv}
+        ${trial}
         <div class="card-category">${esc(s.category)}</div>
         <div class="card-meta">次回更新: ${formatDate(s.nextRenewal)}${memo}</div>
         <div class="card-actions">
@@ -337,11 +524,10 @@ function renderCalendar() {
 
   const map = {};
   subs.forEach(s => {
-    const d = parseYMD(s.nextRenewal);
-    if (d.getFullYear() === calYear && d.getMonth() === calMonth) {
-      const key = d.getDate();
-      (map[key] = map[key] || []).push(s);
-    }
+    billingsInMonth(s, calYear, calMonth).forEach(dateStr => {
+      const day = parseYMD(dateStr).getDate();
+      (map[day] = map[day] || []).push(s);
+    });
   });
 
   const totalCells = Math.ceil((firstDow + daysInMon) / 7) * 7;
@@ -554,10 +740,12 @@ function openModal(id = null) {
     document.getElementById('f-renewal').value  = s.nextRenewal;
     document.getElementById('f-category').value = s.category;
     document.getElementById('f-memo').value     = s.memo || '';
+    document.getElementById('f-trial').value    = s.trialEndsAt || '';
   } else {
     document.getElementById('sub-form').reset();
     document.getElementById('f-cycle').value   = 'monthly';
     document.getElementById('f-renewal').value = dateInDays(30);
+    document.getElementById('f-trial').value   = '';
   }
 
   document.getElementById('modal-overlay').classList.add('open');
@@ -585,6 +773,8 @@ function saveSub(e) {
   }
 
   const existing = editingId ? subs.find(s => s.id === editingId) : null;
+  const trialRaw = document.getElementById('f-trial').value;
+  const trial    = /^\d{4}-\d{2}-\d{2}$/.test(trialRaw) ? trialRaw : null;
   const sub = {
     id:          editingId || uid(),
     name,
@@ -594,6 +784,7 @@ function saveSub(e) {
     category:    document.getElementById('f-category').value,
     memo:        document.getElementById('f-memo').value.trim(),
     createdAt:   existing ? existing.createdAt : todayISO(),
+    trialEndsAt: trial,
   };
 
   if (editingId) {
@@ -654,8 +845,14 @@ function showConfirm({ title = '確認', text = '', okLabel = 'OK', danger = fal
 function markPaid(id) {
   const s = subs.find(x => x.id === id);
   if (!s) return;
-  const prevDate  = s.nextRenewal;
-  s.nextRenewal   = advanceCycle(prevDate, s.cycle);
+  const prevDate = s.nextRenewal;
+  const today    = todayISO();
+  let next   = advanceCycle(prevDate, s.cycle);
+  let safety = 0;
+  while (next <= today && safety++ < 2000) {
+    next = advanceCycle(next, s.cycle);
+  }
+  s.nextRenewal = next;
   persist();
   render();
   showToast(`${s.name} を ${formatDate(s.nextRenewal)} に更新しました`, {
@@ -853,6 +1050,15 @@ function bindEvents() {
     if (btn.classList.contains('btn-edit'))   openModal(id);
     if (btn.classList.contains('btn-delete')) deleteSub(id);
     if (btn.classList.contains('btn-pay'))    markPaid(id);
+  });
+
+  // Cancel candidate panel actions
+  document.getElementById('cancel-candidates').addEventListener('click', e => {
+    const btn = e.target.closest('button[data-id]');
+    if (!btn) return;
+    const id = btn.dataset.id;
+    if (btn.classList.contains('btn-edit'))   openModal(id);
+    if (btn.classList.contains('btn-delete')) deleteSub(id);
   });
 
   // Evaluation tab actions

@@ -10,6 +10,8 @@ const RATING_META = {
   mid:  { emoji: '🙂', label: 'たまに使った', cls: 'rating-mid'  },
   low:  { emoji: '👎', label: 'ほぼ使わず',   cls: 'rating-low'  },
 };
+const CYCLE_SAFETY = 5000;
+const MAX_PENDING_PERIODS = 12;
 
 let subs           = [];
 let ratings        = [];
@@ -21,8 +23,11 @@ let lastDeleted    = null;
 let toastTimer     = null;
 let previousFocus  = null;
 
+const els = {};
+
 // ── Init ────────────────────────────────
 function init() {
+  cacheDom();
   loadData();
   loadRatings();
 
@@ -32,6 +37,27 @@ function init() {
 
   bindEvents();
   render();
+}
+
+function cacheDom() {
+  const ids = [
+    'total-monthly', 'total-yearly', 'sub-count',
+    'summary-this-month', 'summary-this-month-count', 'summary-yearly', 'summary-monthly-equiv',
+    'alert-banner', 'cancel-candidates', 'category-breakdown',
+    'sub-list', 'empty-state', 'empty-text', 'btn-add-empty',
+    'calendar-title', 'calendar-days', 'calendar-summary',
+    'eval-pending', 'eval-history', 'view-eval',
+    'search', 'filter-category',
+    'btn-export', 'btn-import', 'file-import',
+    'btn-prev-month', 'btn-next-month', 'btn-add-header',
+    'modal-overlay', 'modal-title', 'btn-modal-close', 'btn-cancel', 'sub-form',
+    'f-name', 'f-amount', 'f-cycle', 'f-renewal', 'f-category', 'f-memo', 'f-trial',
+    'confirm-overlay', 'confirm-title', 'confirm-text', 'btn-confirm-ok', 'btn-confirm-cancel',
+    'toast', 'toast-text', 'toast-action',
+  ];
+  ids.forEach(id => {
+    els[id.replace(/-([a-z])/g, (_, c) => c.toUpperCase())] = document.getElementById(id);
+  });
 }
 
 function loadData() {
@@ -70,12 +96,16 @@ function normalizeSub(s) {
   const cycle = (s.cycle === 'yearly' || s.cycle === 'weekly') ? s.cycle : 'monthly';
   const trial = (typeof s.trialEndsAt === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s.trialEndsAt))
     ? s.trialEndsAt : null;
+  const renewalDay = parseYMD(s.nextRenewal).getDate();
+  const billingDay = (Number.isInteger(s.billingDay) && s.billingDay >= 1 && s.billingDay <= 31)
+    ? s.billingDay : renewalDay;
   return {
     id:           s.id || uid(),
     name:         String(s.name).slice(0, 60),
     amount:       Math.max(0, Number(s.amount) || 0),
     cycle,
     nextRenewal:  s.nextRenewal,
+    billingDay,
     category:     CATEGORIES.includes(s.category) ? s.category : 'その他',
     memo:         s.memo ? String(s.memo).slice(0, 120) : '',
     createdAt:    s.createdAt || todayISO(),
@@ -121,40 +151,44 @@ function daysUntil(dateStr) {
   return Math.round((target - now) / 86400000);
 }
 
-function advanceCycle(dateStr, cycle) {
+// anchorDay keeps the original billing day across month-end shrinkage
+// (e.g. 1/31 stays anchored to 31, so the next March returns to 3/31).
+function advanceCycle(dateStr, cycle, anchorDay) {
   const d = parseYMD(dateStr);
   if (cycle === 'weekly') {
     d.setDate(d.getDate() + 7);
-  } else if (cycle === 'yearly') {
+    return toYMD(d);
+  }
+  const day = anchorDay || d.getDate();
+  d.setDate(1);
+  if (cycle === 'yearly') {
     d.setFullYear(d.getFullYear() + 1);
   } else {
-    const day = d.getDate();
-    d.setDate(1);
     d.setMonth(d.getMonth() + 1);
-    const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
-    d.setDate(Math.min(day, lastDay));
   }
+  const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+  d.setDate(Math.min(day, lastDay));
   return toYMD(d);
 }
 
-function reverseAdvanceCycle(dateStr, cycle) {
+function reverseAdvanceCycle(dateStr, cycle, anchorDay) {
   const d = parseYMD(dateStr);
   if (cycle === 'weekly') {
     d.setDate(d.getDate() - 7);
-  } else if (cycle === 'yearly') {
+    return toYMD(d);
+  }
+  const day = anchorDay || d.getDate();
+  d.setDate(1);
+  if (cycle === 'yearly') {
     d.setFullYear(d.getFullYear() - 1);
   } else {
-    const day = d.getDate();
-    d.setDate(1);
     d.setMonth(d.getMonth() - 1);
-    const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
-    d.setDate(Math.min(day, lastDay));
   }
+  const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+  d.setDate(Math.min(day, lastDay));
   return toYMD(d);
 }
 
-// Enumerate all billing dates for a subscription that fall in a given calendar month.
-// Walks back from nextRenewal so works for weekly (multi/month), monthly, yearly.
 function billingsInMonth(s, year, month) {
   const mm = String(month + 1).padStart(2, '0');
   const lastDay = new Date(year, month + 1, 0).getDate();
@@ -163,12 +197,12 @@ function billingsInMonth(s, year, month) {
   const out = [];
   let d = s.nextRenewal;
   let safety = 0;
-  while (d > monthEnd && safety++ < 2000) {
-    d = reverseAdvanceCycle(d, s.cycle);
+  while (d > monthEnd && safety++ < CYCLE_SAFETY) {
+    d = reverseAdvanceCycle(d, s.cycle, s.billingDay);
   }
-  while (d >= monthStart && safety++ < 2000) {
+  while (d >= monthStart && safety++ < CYCLE_SAFETY) {
     out.push(d);
-    d = reverseAdvanceCycle(d, s.cycle);
+    d = reverseAdvanceCycle(d, s.cycle, s.billingDay);
   }
   return out.sort();
 }
@@ -180,15 +214,21 @@ function monthlyEquivalent(s) {
   return a;
 }
 
+// Active (i.e. not currently within a free trial). Used for headline totals
+// so trialing subs don't inflate the "current monthly spend".
+function activeMonthlyEquivalent(s) {
+  if (isInTrial(s)) return 0;
+  return monthlyEquivalent(s);
+}
+
 function isInTrial(s) {
   if (!s.trialEndsAt) return false;
   return s.trialEndsAt >= todayISO();
 }
 
 // ── Rating period helpers ────────────────
-function periodForEval(s) {
-  // The calendar month immediately before the next renewal date
-  const d = parseYMD(s.nextRenewal);
+function monthBefore(dateStr) {
+  const d = parseYMD(dateStr);
   d.setDate(1);
   d.setMonth(d.getMonth() - 1);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
@@ -203,14 +243,37 @@ function findRating(subId, period) {
   return ratings.find(r => r.subId === subId && r.period === period);
 }
 
-function shouldShowEval(s, period) {
-  const [y, m] = period.split('-').map(Number);
-  const periodStart = new Date(y, m - 1, 1);
-  const periodEnd   = new Date(y, m, 0); // last day of the period month
+// All evaluable periods for a sub: walk back through past billing cycles,
+// pick each "month before billing date" that has fully ended and falls
+// after the sub was created. Covers cases where markPaid jumped over
+// multiple unevaluated cycles.
+function pendingPeriodsForSub(s) {
   const today = new Date(); today.setHours(0, 0, 0, 0);
-  if (today <= periodEnd) return false; // period not yet finished
-  const created = parseYMD(s.createdAt);
-  return created <= periodStart;
+  const createdMonthStart = parseYMD(s.createdAt);
+  createdMonthStart.setDate(1);
+  createdMonthStart.setHours(0, 0, 0, 0);
+
+  const periods = [];
+  const seen = new Set();
+  let billing = s.nextRenewal;
+  let safety = 0;
+  while (safety++ < CYCLE_SAFETY) {
+    const period       = monthBefore(billing);
+    const [py, pm]     = period.split('-').map(Number);
+    const periodStart  = new Date(py, pm - 1, 1);
+    const periodEnd    = new Date(py, pm, 0);
+    periodEnd.setHours(0, 0, 0, 0);
+    if (today > periodEnd && periodStart >= createdMonthStart && !seen.has(period)) {
+      if (!findRating(s.id, period)) periods.push(period);
+      seen.add(period);
+    }
+    const prev = reverseAdvanceCycle(billing, s.cycle, s.billingDay);
+    if (prev === billing) break;
+    billing = prev;
+    if (parseYMD(billing) < createdMonthStart) break;
+    if (periods.length >= MAX_PENDING_PERIODS) break;
+  }
+  return periods;
 }
 
 // ── Display helpers ──────────────────────
@@ -254,6 +317,16 @@ function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2);
 }
 
+// Folds case, full-width ASCII → half-width, and katakana → hiragana
+// so search matches across width/script variants common in Japanese input.
+function normalizeText(s) {
+  return String(s)
+    .toLowerCase()
+    .replace(/[！-～]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0))
+    .replace(/　/g, ' ')
+    .replace(/[ァ-ヶ]/g, c => String.fromCharCode(c.charCodeAt(0) - 0x60));
+}
+
 // ── Render ───────────────────────────────
 function render() {
   renderHeader();
@@ -277,11 +350,11 @@ function getCancelCandidates() {
     if (lowCount < 2) return null;
     return { sub: s, lowCount, recentLength: recent.length };
   }).filter(Boolean)
-    .sort((a, b) => monthlyEquivalent(b.sub) - monthlyEquivalent(a.sub));
+    .sort((a, b) => activeMonthlyEquivalent(b.sub) - activeMonthlyEquivalent(a.sub));
 }
 
 function renderCancelCandidates() {
-  const el = document.getElementById('cancel-candidates');
+  const el = els.cancelCandidates;
   if (!el) return;
   const candidates = getCancelCandidates();
   if (candidates.length === 0) {
@@ -290,7 +363,7 @@ function renderCancelCandidates() {
     return;
   }
   el.style.display = '';
-  const savings = candidates.reduce((sum, c) => sum + monthlyEquivalent(c.sub) * 12, 0);
+  const savings = candidates.reduce((sum, c) => sum + activeMonthlyEquivalent(c.sub) * 12, 0);
 
   el.innerHTML = `
     <div class="cancel-candidates-head">
@@ -308,7 +381,7 @@ function renderCancelCandidates() {
         <div class="cancel-candidate-card">
           <div class="cc-info">
             <div class="cc-name">${esc(sub.name)}</div>
-            <div class="cc-meta">月額換算 ${yen(monthlyEquivalent(sub))}・直近${recentLength}回中 👎${lowCount}回</div>
+            <div class="cc-meta">月額換算 ${yen(activeMonthlyEquivalent(sub))}・直近${recentLength}回中 👎${lowCount}回</div>
           </div>
           <div class="cc-actions">
             <button type="button" class="btn-edit"   data-id="${sub.id}">編集</button>
@@ -320,7 +393,7 @@ function renderCancelCandidates() {
 }
 
 function renderCategoryBreakdown() {
-  const el = document.getElementById('category-breakdown');
+  const el = els.categoryBreakdown;
   if (!el) return;
   if (subs.length === 0) {
     el.innerHTML = '';
@@ -331,7 +404,7 @@ function renderCategoryBreakdown() {
   const byCat = {};
   CATEGORIES.forEach(c => { byCat[c] = 0; });
   subs.forEach(s => {
-    byCat[s.category] = (byCat[s.category] || 0) + monthlyEquivalent(s);
+    byCat[s.category] = (byCat[s.category] || 0) + activeMonthlyEquivalent(s);
   });
   const entries = Object.entries(byCat)
     .filter(([, v]) => v > 0)
@@ -367,34 +440,37 @@ function renderSummary() {
   const y = now.getFullYear(), m = now.getMonth();
   const today = todayISO();
 
-  let total = 0, paid = 0, upcoming = 0;
+  let total = 0, paid = 0, upcoming = 0, todayCount = 0;
   subs.forEach(s => {
     billingsInMonth(s, y, m).forEach(dateStr => {
+      if (s.trialEndsAt && dateStr <= s.trialEndsAt) return;
       total += Number(s.amount) || 0;
-      if (dateStr < today) paid++;
-      else upcoming++;
+      if (dateStr < today)      paid++;
+      else if (dateStr === today) { upcoming++; todayCount++; }
+      else                       upcoming++;
     });
   });
   const count = paid + upcoming;
 
-  const monthly = subs.reduce((sum, s) => sum + monthlyEquivalent(s), 0);
+  const monthly = subs.reduce((sum, s) => sum + activeMonthlyEquivalent(s), 0);
 
-  document.getElementById('summary-this-month').textContent = yen(total);
-  document.getElementById('summary-this-month-count').textContent =
-    count === 0 ? '0件' : `${count}件（支払済 ${paid} / 予定 ${upcoming}）`;
-  document.getElementById('summary-yearly').textContent        = yen(monthly * 12);
-  document.getElementById('summary-monthly-equiv').textContent = `月額換算 ${yen(monthly)}`;
+  els.summaryThisMonth.textContent = yen(total);
+  const todaySuffix = todayCount > 0 ? '・今日含む' : '';
+  els.summaryThisMonthCount.textContent =
+    count === 0 ? '0件' : `${count}件（支払済 ${paid} / 予定 ${upcoming}${todaySuffix}）`;
+  els.summaryYearly.textContent       = yen(monthly * 12);
+  els.summaryMonthlyEquiv.textContent = `月額換算 ${yen(monthly)}`;
 }
 
 function renderHeader() {
-  const monthly = subs.reduce((sum, s) => sum + monthlyEquivalent(s), 0);
-  document.getElementById('total-monthly').textContent = yen(monthly);
-  document.getElementById('total-yearly').textContent  = yen(monthly * 12);
-  document.getElementById('sub-count').textContent     = `${subs.length}件`;
+  const monthly = subs.reduce((sum, s) => sum + activeMonthlyEquivalent(s), 0);
+  els.totalMonthly.textContent = yen(monthly);
+  els.totalYearly.textContent  = yen(monthly * 12);
+  els.subCount.textContent     = `${subs.length}件`;
 }
 
 function renderAlert() {
-  const banner = document.getElementById('alert-banner');
+  const banner = els.alertBanner;
   const lines  = [];
   let hasDanger = false;
 
@@ -439,24 +515,20 @@ function renderAlert() {
 }
 
 function getVisibleSubs() {
-  const q = searchQuery.trim().toLowerCase();
+  const q = normalizeText(searchQuery.trim());
   return subs.filter(s => {
     if (filterCategory && s.category !== filterCategory) return false;
     if (!q) return true;
-    const hay = [
-      s.name,
-      s.memo || '',
-      s.category || '',
-    ].join(' ').toLowerCase();
+    const hay = normalizeText([s.name, s.memo || '', s.category || ''].join(' '));
     return hay.includes(q);
   });
 }
 
 function renderList() {
-  const list      = document.getElementById('sub-list');
-  const empty     = document.getElementById('empty-state');
-  const emptyText = document.getElementById('empty-text');
-  const emptyBtn  = document.getElementById('btn-add-empty');
+  const list      = els.subList;
+  const empty     = els.emptyState;
+  const emptyText = els.emptyText;
+  const emptyBtn  = els.btnAddEmpty;
 
   if (subs.length === 0) {
     list.innerHTML        = '';
@@ -515,7 +587,7 @@ function renderList() {
 }
 
 function renderCalendar() {
-  document.getElementById('calendar-title').textContent = `${calYear}年${calMonth + 1}月`;
+  els.calendarTitle.textContent = `${calYear}年${calMonth + 1}月`;
 
   const firstDow   = new Date(calYear, calMonth, 1).getDay();
   const daysInMon  = new Date(calYear, calMonth + 1, 0).getDate();
@@ -528,6 +600,10 @@ function renderCalendar() {
       const day = parseYMD(dateStr).getDate();
       (map[day] = map[day] || []).push(s);
     });
+  });
+  // Highest amount first within a day
+  Object.keys(map).forEach(day => {
+    map[day].sort((a, b) => (Number(b.amount) || 0) - (Number(a.amount) || 0));
   });
 
   const totalCells = Math.ceil((firstDow + daysInMon) / 7) * 7;
@@ -565,13 +641,13 @@ function renderCalendar() {
     parts.push('</div>');
   }
 
-  document.getElementById('calendar-days').innerHTML = parts.join('');
+  els.calendarDays.innerHTML = parts.join('');
 
   renderCalendarSummary(map);
 }
 
 function renderCalendarSummary(map) {
-  const summaryEl = document.getElementById('calendar-summary');
+  const summaryEl = els.calendarSummary;
   const title = `${calYear}年${calMonth + 1}月の支払い予定`;
 
   const items = [];
@@ -612,13 +688,18 @@ function renderCalendarSummary(map) {
 
 // ── Evaluation tab ───────────────────────
 function renderEval() {
-  const pendingEl = document.getElementById('eval-pending');
-  const historyEl = document.getElementById('eval-history');
+  const pendingEl = els.evalPending;
+  const historyEl = els.evalHistory;
 
-  const pendingItems = subs
-    .map(s => ({ s, period: periodForEval(s) }))
-    .filter(({ s, period }) => !findRating(s.id, period) && shouldShowEval(s, period))
-    .sort((a, b) => a.period.localeCompare(b.period));
+  const cancelIds = new Set(getCancelCandidates().map(c => c.sub.id));
+
+  const pendingItems = [];
+  subs.forEach(s => {
+    pendingPeriodsForSub(s).forEach(period => {
+      pendingItems.push({ s, period });
+    });
+  });
+  pendingItems.sort((a, b) => a.period.localeCompare(b.period));
 
   if (pendingItems.length === 0) {
     pendingEl.innerHTML = `
@@ -632,7 +713,10 @@ function renderEval() {
       ${pendingItems.map(({ s, period }) => `
         <div class="eval-card">
           <div class="eval-card-head">
-            <div class="eval-card-name">${esc(s.name)}</div>
+            <div class="eval-card-name">
+              ${esc(s.name)}
+              ${cancelIds.has(s.id) ? '<span class="eval-cancel-badge">💸 解約候補</span>' : ''}
+            </div>
             <div class="eval-card-period">${periodLabel(period)}の利用度を評価</div>
           </div>
           <div class="eval-buttons">
@@ -686,6 +770,7 @@ function setRating(subId, period, value) {
   }
   persistRatings();
   renderEval();
+  renderCancelCandidates();
   const meta = RATING_META[value];
   const sub  = subs.find(s => s.id === subId);
   if (sub) showToast(`${sub.name} ${periodLabel(period)}: ${meta.emoji} ${meta.label}`);
@@ -697,6 +782,7 @@ function clearRating(subId, period) {
   ratings.splice(idx, 1);
   persistRatings();
   renderEval();
+  renderCancelCandidates();
 }
 
 // ── Tab switching ────────────────────────
@@ -729,31 +815,31 @@ function nextMonth() {
 function openModal(id = null) {
   editingId     = id;
   previousFocus = document.activeElement;
-  document.getElementById('modal-title').textContent = id ? 'サブスクを編集' : 'サブスクを追加';
+  els.modalTitle.textContent = id ? 'サブスクを編集' : 'サブスクを追加';
 
   if (id) {
     const s = subs.find(x => x.id === id);
     if (!s) return;
-    document.getElementById('f-name').value     = s.name;
-    document.getElementById('f-amount').value   = s.amount;
-    document.getElementById('f-cycle').value    = s.cycle;
-    document.getElementById('f-renewal').value  = s.nextRenewal;
-    document.getElementById('f-category').value = s.category;
-    document.getElementById('f-memo').value     = s.memo || '';
-    document.getElementById('f-trial').value    = s.trialEndsAt || '';
+    els.fName.value     = s.name;
+    els.fAmount.value   = s.amount;
+    els.fCycle.value    = s.cycle;
+    els.fRenewal.value  = s.nextRenewal;
+    els.fCategory.value = s.category;
+    els.fMemo.value     = s.memo || '';
+    els.fTrial.value    = s.trialEndsAt || '';
   } else {
-    document.getElementById('sub-form').reset();
-    document.getElementById('f-cycle').value   = 'monthly';
-    document.getElementById('f-renewal').value = dateInDays(30);
-    document.getElementById('f-trial').value   = '';
+    els.subForm.reset();
+    els.fCycle.value   = 'monthly';
+    els.fRenewal.value = dateInDays(30);
+    els.fTrial.value   = '';
   }
 
-  document.getElementById('modal-overlay').classList.add('open');
-  requestAnimationFrame(() => document.getElementById('f-name').focus());
+  els.modalOverlay.classList.add('open');
+  requestAnimationFrame(() => els.fName.focus());
 }
 
 function closeModal() {
-  document.getElementById('modal-overlay').classList.remove('open');
+  els.modalOverlay.classList.remove('open');
   editingId = null;
   if (previousFocus && document.body.contains(previousFocus)) {
     previousFocus.focus();
@@ -763,26 +849,40 @@ function closeModal() {
 
 function saveSub(e) {
   e.preventDefault();
-  const name    = document.getElementById('f-name').value.trim();
-  const amount  = Number(document.getElementById('f-amount').value);
-  const renewal = document.getElementById('f-renewal').value;
+  const name    = els.fName.value.trim();
+  const amount  = Number(els.fAmount.value);
+  const renewal = els.fRenewal.value;
 
-  if (!name || !renewal || !(amount >= 1)) {
+  if (!name || !renewal || !Number.isFinite(amount) || amount < 0) {
     showToast('入力内容を確認してください');
     return;
   }
 
-  const existing = editingId ? subs.find(s => s.id === editingId) : null;
-  const trialRaw = document.getElementById('f-trial').value;
+  const trialRaw = els.fTrial.value;
   const trial    = /^\d{4}-\d{2}-\d{2}$/.test(trialRaw) ? trialRaw : null;
+  if (trial && trial < todayISO()) {
+    showToast('トライアル終了日は今日以降を指定してください');
+    return;
+  }
+
+  const existing   = editingId ? subs.find(s => s.id === editingId) : null;
+  const renewalDay = parseYMD(renewal).getDate();
+  // Re-anchor billingDay when the user edits the renewal date — the new day
+  // becomes the canonical "billing day" so future cycles return to it after
+  // month-end shrinkage.
+  const billingDay = (existing && existing.nextRenewal === renewal)
+    ? existing.billingDay
+    : renewalDay;
+
   const sub = {
     id:          editingId || uid(),
     name,
     amount,
-    cycle:       document.getElementById('f-cycle').value,
+    cycle:       els.fCycle.value,
     nextRenewal: renewal,
-    category:    document.getElementById('f-category').value,
-    memo:        document.getElementById('f-memo').value.trim(),
+    billingDay,
+    category:    els.fCategory.value,
+    memo:        els.fMemo.value.trim(),
     createdAt:   existing ? existing.createdAt : todayISO(),
     trialEndsAt: trial,
   };
@@ -802,11 +902,11 @@ function saveSub(e) {
 // ── Confirm modal (Promise-based) ────────
 function showConfirm({ title = '確認', text = '', okLabel = 'OK', danger = false } = {}) {
   return new Promise(resolve => {
-    const overlay   = document.getElementById('confirm-overlay');
-    const titleEl   = document.getElementById('confirm-title');
-    const textEl    = document.getElementById('confirm-text');
-    const okBtn     = document.getElementById('btn-confirm-ok');
-    const cancelBtn = document.getElementById('btn-confirm-cancel');
+    const overlay   = els.confirmOverlay;
+    const titleEl   = els.confirmTitle;
+    const textEl    = els.confirmText;
+    const okBtn     = els.btnConfirmOk;
+    const cancelBtn = els.btnConfirmCancel;
     const prevFocus = document.activeElement;
 
     titleEl.textContent  = title;
@@ -847,10 +947,10 @@ function markPaid(id) {
   if (!s) return;
   const prevDate = s.nextRenewal;
   const today    = todayISO();
-  let next   = advanceCycle(prevDate, s.cycle);
+  let next   = advanceCycle(prevDate, s.cycle, s.billingDay);
   let safety = 0;
-  while (next <= today && safety++ < 2000) {
-    next = advanceCycle(next, s.cycle);
+  while (next <= today && safety++ < CYCLE_SAFETY) {
+    next = advanceCycle(next, s.cycle, s.billingDay);
   }
   s.nextRenewal = next;
   persist();
@@ -873,15 +973,21 @@ async function deleteSub(id) {
   if (!s) return;
   const ok = await showConfirm({
     title:   '削除しますか？',
-    text:    `「${s.name}」を削除します。`,
+    text:    `「${s.name}」を削除します。関連する評価履歴も一緒に削除されます。`,
     okLabel: '削除',
     danger:  true,
   });
   if (!ok) return;
 
-  const idx = subs.findIndex(x => x.id === id);
-  lastDeleted = { sub: s, idx };
+  const idx           = subs.findIndex(x => x.id === id);
+  const removedRatings = ratings.filter(r => r.subId === id);
+  lastDeleted          = { sub: s, idx, ratings: removedRatings };
+
   subs.splice(idx, 1);
+  if (removedRatings.length > 0) {
+    ratings = ratings.filter(r => r.subId !== id);
+    persistRatings();
+  }
   persist();
   render();
   showToast(`「${s.name}」を削除しました`, { label: '取り消し', action: undoDelete });
@@ -889,8 +995,12 @@ async function deleteSub(id) {
 
 function undoDelete() {
   if (!lastDeleted) return;
-  const { sub, idx } = lastDeleted;
+  const { sub, idx, ratings: oldRatings } = lastDeleted;
   subs.splice(Math.min(idx, subs.length), 0, sub);
+  if (oldRatings && oldRatings.length > 0) {
+    ratings = ratings.concat(oldRatings);
+    persistRatings();
+  }
   lastDeleted = null;
   persist();
   render();
@@ -898,9 +1008,9 @@ function undoDelete() {
 
 // ── Toast ────────────────────────────────
 function showToast(text, action = null) {
-  const toast  = document.getElementById('toast');
-  const textEl = document.getElementById('toast-text');
-  const btn    = document.getElementById('toast-action');
+  const toast  = els.toast;
+  const textEl = els.toastText;
+  const btn    = els.toastAction;
   textEl.textContent = text;
 
   if (action) {
@@ -920,7 +1030,7 @@ function showToast(text, action = null) {
 }
 
 function hideToast() {
-  const toast = document.getElementById('toast');
+  const toast = els.toast;
   toast.classList.remove('show');
   setTimeout(() => { toast.hidden = true; }, 200);
 }
@@ -972,6 +1082,7 @@ async function importData(file) {
     render();
     showToast('インポートしました');
   } catch (err) {
+    console.warn('Import failed:', err);
     showToast('インポートに失敗しました（JSONを確認してください）');
   }
 }
@@ -1018,31 +1129,30 @@ function bindEvents() {
   });
 
   // Edit modal
-  document.getElementById('btn-modal-close').addEventListener('click', closeModal);
-  document.getElementById('btn-cancel').addEventListener('click', closeModal);
-  document.getElementById('modal-overlay').addEventListener('click', e => {
+  els.btnModalClose.addEventListener('click', closeModal);
+  els.btnCancel.addEventListener('click', closeModal);
+  els.modalOverlay.addEventListener('click', e => {
     if (e.target.id === 'modal-overlay') closeModal();
   });
-  document.getElementById('sub-form').addEventListener('submit', saveSub);
+  els.subForm.addEventListener('submit', saveSub);
 
   // ESC + focus trap for edit modal
   document.addEventListener('keydown', e => {
-    const overlay = document.getElementById('modal-overlay');
-    if (!overlay.classList.contains('open')) return;
+    if (!els.modalOverlay.classList.contains('open')) return;
     if (e.key === 'Escape') { closeModal(); return; }
-    trapFocus(overlay, e);
+    trapFocus(els.modalOverlay, e);
   });
 
   // Calendar nav
-  document.getElementById('btn-prev-month').addEventListener('click', prevMonth);
-  document.getElementById('btn-next-month').addEventListener('click', nextMonth);
+  els.btnPrevMonth.addEventListener('click', prevMonth);
+  els.btnNextMonth.addEventListener('click', nextMonth);
 
   // Add buttons
-  document.getElementById('btn-add-header').addEventListener('click', () => openModal());
-  document.getElementById('btn-add-empty').addEventListener('click', () => openModal());
+  els.btnAddHeader.addEventListener('click', () => openModal());
+  els.btnAddEmpty.addEventListener('click', () => openModal());
 
   // Card actions
-  document.getElementById('sub-list').addEventListener('click', e => {
+  els.subList.addEventListener('click', e => {
     const btn = e.target.closest('button');
     if (!btn) return;
     const id = btn.dataset.id;
@@ -1053,7 +1163,7 @@ function bindEvents() {
   });
 
   // Cancel candidate panel actions
-  document.getElementById('cancel-candidates').addEventListener('click', e => {
+  els.cancelCandidates.addEventListener('click', e => {
     const btn = e.target.closest('button[data-id]');
     if (!btn) return;
     const id = btn.dataset.id;
@@ -1062,7 +1172,7 @@ function bindEvents() {
   });
 
   // Evaluation tab actions
-  document.getElementById('view-eval').addEventListener('click', e => {
+  els.viewEval.addEventListener('click', e => {
     const btn = e.target.closest('button');
     if (!btn) return;
     const action = btn.dataset.action;
@@ -1071,21 +1181,19 @@ function bindEvents() {
   });
 
   // Search & filter
-  document.getElementById('search').addEventListener('input', e => {
+  els.search.addEventListener('input', e => {
     searchQuery = e.target.value;
     renderList();
   });
-  document.getElementById('filter-category').addEventListener('change', e => {
+  els.filterCategory.addEventListener('change', e => {
     filterCategory = e.target.value;
     renderList();
   });
 
   // Export / Import
-  document.getElementById('btn-export').addEventListener('click', exportData);
-  document.getElementById('btn-import').addEventListener('click', () => {
-    document.getElementById('file-import').click();
-  });
-  document.getElementById('file-import').addEventListener('change', e => {
+  els.btnExport.addEventListener('click', exportData);
+  els.btnImport.addEventListener('click', () => els.fileImport.click());
+  els.fileImport.addEventListener('change', e => {
     const file = e.target.files[0];
     if (file) importData(file);
     e.target.value = '';

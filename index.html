@@ -79,14 +79,14 @@
         <span id="calendar-title"></span>
         <button type="button" id="btn-next-month" aria-label="翌月">›</button>
       </div>
-      <div class="calendar-grid" aria-hidden="true">
-        <div class="day-header sun">日</div>
-        <div class="day-header">月</div>
-        <div class="day-header">火</div>
-        <div class="day-header">水</div>
-        <div class="day-header">木</div>
-        <div class="day-header">金</div>
-        <div class="day-header sat">土</div>
+      <div class="calendar-grid" role="row">
+        <div class="day-header sun" role="columnheader">日</div>
+        <div class="day-header" role="columnheader">月</div>
+        <div class="day-header" role="columnheader">火</div>
+        <div class="day-header" role="columnheader">水</div>
+        <div class="day-header" role="columnheader">木</div>
+        <div class="day-header" role="columnheader">金</div>
+        <div class="day-header sat" role="columnheader">土</div>
       </div>
       <div id="calendar-days" class="calendar-days"></div>
       <div id="calendar-summary" class="calendar-summary"></div>
@@ -120,7 +120,7 @@
         <div class="form-row">
           <div class="form-group">
             <label for="f-amount">金額（円）</label>
-            <input type="number" id="f-amount" placeholder="1490" min="1" max="9999999" required inputmode="numeric">
+            <input type="number" id="f-amount" placeholder="1490" min="0" max="9999999" required inputmode="numeric">
           </div>
           <div class="form-group">
             <label for="f-cycle">課金サイクル</label>

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#0f172a"/>
+  <circle cx="256" cy="256" r="176" fill="none" stroke="#6366f1" stroke-width="24"/>
+  <path d="M256 128 A 128 128 0 0 1 384 256 L 336 256 A 80 80 0 0 0 256 176 Z" fill="#6366f1"/>
+  <text x="256" y="304" text-anchor="middle" fill="#f1f5f9" font-family="Segoe UI, sans-serif" font-size="120" font-weight="800">¥</text>
+</svg>

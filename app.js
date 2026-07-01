@@ -12,6 +12,9 @@ const RATING_META = {
 };
 const CYCLE_SAFETY = 5000;
 const MAX_PENDING_PERIODS = 12;
+const STORAGE_KEY_THEME   = 'subtracker_theme_v1';
+const YEARLY_ALERT_DAYS   = 30;
+const MAX_PRICE_HISTORY   = 10;
 
 let subs           = [];
 let ratings        = [];
@@ -19,6 +22,7 @@ let editingId      = null;
 let calYear, calMonth;
 let searchQuery    = '';
 let filterCategory = '';
+let sortBy         = 'renewal';
 let lastDeleted    = null;
 let toastTimer     = null;
 let previousFocus  = null;
@@ -27,6 +31,7 @@ const els = {};
 
 // ── Init ────────────────────────────────
 function init() {
+  loadTheme();
   cacheDom();
   loadData();
   loadRatings();
@@ -37,6 +42,38 @@ function init() {
 
   bindEvents();
   render();
+  registerServiceWorker();
+}
+
+function loadTheme() {
+  let theme = 'dark';
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY_THEME);
+    if (saved === 'light' || saved === 'dark') theme = saved;
+  } catch {}
+  applyTheme(theme);
+}
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+}
+
+function toggleTheme() {
+  const cur = document.documentElement.getAttribute('data-theme') || 'dark';
+  const next = cur === 'dark' ? 'light' : 'dark';
+  applyTheme(next);
+  try { localStorage.setItem(STORAGE_KEY_THEME, next); } catch {}
+  const btn = els.btnTheme;
+  if (btn) btn.textContent = next === 'dark' ? '🌙' : '☀️';
+}
+
+function registerServiceWorker() {
+  if (!('serviceWorker' in navigator)) return;
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(err => {
+      console.warn('SW registration failed', err);
+    });
+  });
 }
 
 function cacheDom() {
@@ -47,11 +84,12 @@ function cacheDom() {
     'sub-list', 'empty-state', 'empty-text', 'btn-add-empty',
     'calendar-title', 'calendar-days', 'calendar-summary',
     'eval-pending', 'eval-history', 'view-eval',
-    'search', 'filter-category',
-    'btn-export', 'btn-import', 'file-import',
+    'search', 'filter-category', 'sort-by',
+    'btn-export', 'btn-import', 'file-import', 'btn-theme',
     'btn-prev-month', 'btn-next-month', 'btn-add-header',
     'modal-overlay', 'modal-title', 'btn-modal-close', 'btn-cancel', 'sub-form',
     'f-name', 'f-amount', 'f-cycle', 'f-renewal', 'f-category', 'f-memo', 'f-trial',
+    'f-pause', 'f-url', 'f-equiv', 'price-history',
     'confirm-overlay', 'confirm-title', 'confirm-text', 'btn-confirm-ok', 'btn-confirm-cancel',
     'toast', 'toast-text', 'toast-action',
   ];
@@ -96,9 +134,18 @@ function normalizeSub(s) {
   const cycle = (s.cycle === 'yearly' || s.cycle === 'weekly') ? s.cycle : 'monthly';
   const trial = (typeof s.trialEndsAt === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s.trialEndsAt))
     ? s.trialEndsAt : null;
+  const paused = (typeof s.pausedUntil === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s.pausedUntil))
+    ? s.pausedUntil : null;
   const renewalDay = parseYMD(s.nextRenewal).getDate();
   const billingDay = (Number.isInteger(s.billingDay) && s.billingDay >= 1 && s.billingDay <= 31)
     ? s.billingDay : renewalDay;
+  const url = sanitizeUrl(s.url);
+  const priceHistory = Array.isArray(s.priceHistory)
+    ? s.priceHistory
+        .filter(p => p && typeof p.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(p.date) && Number.isFinite(Number(p.amount)))
+        .map(p => ({ date: p.date, amount: Math.max(0, Number(p.amount)) }))
+        .slice(-MAX_PRICE_HISTORY)
+    : [];
   return {
     id:           s.id || uid(),
     name:         String(s.name).slice(0, 60),
@@ -110,7 +157,24 @@ function normalizeSub(s) {
     memo:         s.memo ? String(s.memo).slice(0, 120) : '',
     createdAt:    s.createdAt || todayISO(),
     trialEndsAt:  trial,
+    pausedUntil:  paused,
+    url,
+    priceHistory,
   };
+}
+
+// Only http/https URLs. Strips whitespace and rejects javascript:, data:, etc.
+function sanitizeUrl(raw) {
+  if (typeof raw !== 'string') return null;
+  const s = raw.trim();
+  if (!s) return null;
+  try {
+    const u = new URL(s);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+    return u.toString();
+  } catch {
+    return null;
+  }
 }
 
 function persist() {
@@ -194,6 +258,8 @@ function billingsInMonth(s, year, month) {
   const lastDay = new Date(year, month + 1, 0).getDate();
   const monthStart = `${year}-${mm}-01`;
   const monthEnd   = `${year}-${mm}-${String(lastDay).padStart(2, '0')}`;
+  const createdAt  = s.createdAt || '0000-01-01';
+  const pausedTo   = s.pausedUntil || '';
   const out = [];
   let d = s.nextRenewal;
   let safety = 0;
@@ -201,7 +267,7 @@ function billingsInMonth(s, year, month) {
     d = reverseAdvanceCycle(d, s.cycle, s.billingDay);
   }
   while (d >= monthStart && safety++ < CYCLE_SAFETY) {
-    out.push(d);
+    if (d >= createdAt && d > pausedTo) out.push(d);
     d = reverseAdvanceCycle(d, s.cycle, s.billingDay);
   }
   return out.sort();
@@ -214,16 +280,22 @@ function monthlyEquivalent(s) {
   return a;
 }
 
-// Active (i.e. not currently within a free trial). Used for headline totals
-// so trialing subs don't inflate the "current monthly spend".
+// Active (i.e. not currently within a free trial and not paused). Used for
+// headline totals so trialing/paused subs don't inflate the "current monthly
+// spend".
 function activeMonthlyEquivalent(s) {
-  if (isInTrial(s)) return 0;
+  if (isInTrial(s) || isPaused(s)) return 0;
   return monthlyEquivalent(s);
 }
 
 function isInTrial(s) {
   if (!s.trialEndsAt) return false;
   return s.trialEndsAt >= todayISO();
+}
+
+function isPaused(s) {
+  if (!s.pausedUntil) return false;
+  return s.pausedUntil >= todayISO();
 }
 
 // ── Rating period helpers ────────────────
@@ -263,7 +335,9 @@ function pendingPeriodsForSub(s) {
     const periodStart  = new Date(py, pm - 1, 1);
     const periodEnd    = new Date(py, pm, 0);
     periodEnd.setHours(0, 0, 0, 0);
-    if (today > periodEnd && periodStart >= createdMonthStart && !seen.has(period)) {
+    const pausedTo = s.pausedUntil ? parseYMD(s.pausedUntil) : null;
+    const duringPause = pausedTo && periodEnd <= pausedTo;
+    if (today > periodEnd && periodStart >= createdMonthStart && !seen.has(period) && !duringPause) {
       if (!findRating(s.id, period)) periods.push(period);
       seen.add(period);
     }
@@ -317,13 +391,13 @@ function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2);
 }
 
-// Folds case, full-width ASCII → half-width, and katakana → hiragana
+// Folds case, full-/half-width variants (via NFKC), and katakana → hiragana
 // so search matches across width/script variants common in Japanese input.
+// NFKC also composes half-width katakana + dakuten (ｶﾞ → ガ) before folding.
 function normalizeText(s) {
   return String(s)
+    .normalize('NFKC')
     .toLowerCase()
-    .replace(/[！-～]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0))
-    .replace(/　/g, ' ')
     .replace(/[ァ-ヶ]/g, c => String.fromCharCode(c.charCodeAt(0) - 0x60));
 }
 
@@ -341,6 +415,7 @@ function render() {
 
 function getCancelCandidates() {
   return subs.map(s => {
+    if (isPaused(s)) return null;
     const rs = ratings
       .filter(r => r.subId === s.id)
       .sort((a, b) => b.period.localeCompare(a.period));
@@ -474,13 +549,16 @@ function renderAlert() {
   const lines  = [];
   let hasDanger = false;
 
-  const renewals = subs
+  const active = subs.filter(s => !isPaused(s));
+
+  const renewals = active
     .map(s => ({ s, d: daysUntil(s.nextRenewal) }))
-    .filter(({ d }) => d <= 7)
+    .filter(({ s, d }) => d <= 7 || (s.cycle === 'yearly' && d <= YEARLY_ALERT_DAYS))
     .sort((a, b) => a.d - b.d);
 
   const overdue  = renewals.filter(x => x.d <  0);
-  const upcoming = renewals.filter(x => x.d >= 0);
+  const upcoming = renewals.filter(x => x.d >= 0 && x.d <= 7);
+  const yearlyEarly = renewals.filter(x => x.d > 7 && x.s.cycle === 'yearly');
 
   if (overdue.length > 0) {
     hasDanger = true;
@@ -491,8 +569,12 @@ function renderAlert() {
     const names = upcoming.map(({ s, d }) => `${esc(s.name)}（${daysLabel(d)}）`).join('、');
     lines.push(`<div class="alert-line line-warning">⏰ まもなく更新: ${names}</div>`);
   }
+  if (yearlyEarly.length > 0) {
+    const names = yearlyEarly.map(({ s, d }) => `${esc(s.name)}（あと${d}日）`).join('、');
+    lines.push(`<div class="alert-line line-yearly">📅 年額サブスク更新予告: ${names}</div>`);
+  }
 
-  const trials = subs
+  const trials = active
     .filter(s => s.trialEndsAt)
     .map(s => ({ s, d: daysUntil(s.trialEndsAt) }))
     .filter(({ d }) => d >= 0 && d <= 7)
@@ -524,6 +606,21 @@ function getVisibleSubs() {
   });
 }
 
+function sortSubs(list) {
+  const copy = list.slice();
+  switch (sortBy) {
+    case 'amount-desc':
+      return copy.sort((a, b) => monthlyEquivalent(b) - monthlyEquivalent(a));
+    case 'amount-asc':
+      return copy.sort((a, b) => monthlyEquivalent(a) - monthlyEquivalent(b));
+    case 'name':
+      return copy.sort((a, b) => normalizeText(a.name).localeCompare(normalizeText(b.name), 'ja'));
+    case 'renewal':
+    default:
+      return copy.sort((a, b) => daysUntil(a.nextRenewal) - daysUntil(b.nextRenewal));
+  }
+}
+
 function renderList() {
   const list      = els.subList;
   const empty     = els.emptyState;
@@ -549,11 +646,11 @@ function renderList() {
 
   empty.style.display = 'none';
 
-  const sorted = visible
-    .map(s => ({ s, d: daysUntil(s.nextRenewal) }))
-    .sort((a, b) => a.d - b.d);
+  const sorted = sortSubs(visible);
 
-  list.innerHTML = sorted.map(({ s, d }) => {
+  list.innerHTML = sorted.map(s => {
+    const d          = daysUntil(s.nextRenewal);
+    const paused     = isPaused(s);
     const memo       = s.memo ? `<br>${esc(s.memo)}` : '';
     const cycleLabel = CYCLE_LABEL[s.cycle] || '月';
     const equiv      = s.cycle !== 'monthly'
@@ -566,19 +663,34 @@ function renderList() {
       const label = td === 0 ? '🆓 本日トライアル終了' : `🆓 トライアル中（あと${td}日）`;
       trial = `<div class="trial-badge${urgent}">${label}</div>`;
     }
+    let pauseBadge = '';
+    if (paused) {
+      pauseBadge = `<div class="pause-badge">⏸ 停止中（〜${formatDate(s.pausedUntil)}）</div>`;
+    }
+    const urlLink = s.url
+      ? `<a class="card-url" href="${esc(s.url)}" target="_blank" rel="noopener noreferrer" title="サービスを開く">🔗</a>`
+      : '';
+    const cardCls = paused ? 'sub-card paused' : `sub-card ${cardClass(d)}`;
+    const badgeHtml = paused
+      ? '<span class="badge badge-paused">停止中</span>'
+      : `<span class="badge ${badgeClass(d)}">${daysLabel(d)}</span>`;
+    const payBtn = paused
+      ? `<button type="button" class="btn-resume" data-id="${s.id}" title="停止を解除">▶ 再開</button>`
+      : `<button type="button" class="btn-pay" data-id="${s.id}" title="次サイクルへ更新">✓ 支払済</button>`;
     return `
-      <div class="sub-card ${cardClass(d)}">
+      <div class="${cardCls}">
         <div class="card-top">
-          <div class="card-name">${esc(s.name)}</div>
-          <span class="badge ${badgeClass(d)}">${daysLabel(d)}</span>
+          <div class="card-name">${esc(s.name)}${urlLink}</div>
+          ${badgeHtml}
         </div>
         <div class="card-amount">${yen(s.amount)}<small> / ${cycleLabel}</small></div>
         ${equiv}
         ${trial}
+        ${pauseBadge}
         <div class="card-category">${esc(s.category)}</div>
         <div class="card-meta">次回更新: ${formatDate(s.nextRenewal)}${memo}</div>
         <div class="card-actions">
-          <button type="button" class="btn-pay"    data-id="${s.id}" title="次サイクルへ更新">✓ 支払済</button>
+          ${payBtn}
           <button type="button" class="btn-edit"   data-id="${s.id}">編集</button>
           <button type="button" class="btn-delete" data-id="${s.id}">削除</button>
         </div>
@@ -597,6 +709,7 @@ function renderCalendar() {
   const map = {};
   subs.forEach(s => {
     billingsInMonth(s, calYear, calMonth).forEach(dateStr => {
+      if (s.trialEndsAt && dateStr <= s.trialEndsAt) return;
       const day = parseYMD(dateStr).getDate();
       (map[day] = map[day] || []).push(s);
     });
@@ -827,15 +940,57 @@ function openModal(id = null) {
     els.fCategory.value = s.category;
     els.fMemo.value     = s.memo || '';
     els.fTrial.value    = s.trialEndsAt || '';
+    els.fPause.value    = s.pausedUntil || '';
+    els.fUrl.value      = s.url || '';
   } else {
     els.subForm.reset();
     els.fCycle.value   = 'monthly';
     els.fRenewal.value = dateInDays(30);
     els.fTrial.value   = '';
+    els.fPause.value   = '';
+    els.fUrl.value     = '';
   }
+
+  updateLiveEquiv();
+  renderPriceHistoryInModal();
 
   els.modalOverlay.classList.add('open');
   requestAnimationFrame(() => els.fName.focus());
+}
+
+function updateLiveEquiv() {
+  const el = els.fEquiv;
+  if (!el) return;
+  const amount = Number(els.fAmount.value);
+  const cycle  = els.fCycle.value;
+  if (!Number.isFinite(amount) || amount <= 0) {
+    el.textContent = '';
+    return;
+  }
+  const eq = monthlyEquivalent({ amount, cycle });
+  const yearly = eq * 12;
+  el.textContent = cycle === 'monthly'
+    ? `年間 ≈ ${yen(yearly)}`
+    : `月額 ≈ ${yen(eq)}・年間 ≈ ${yen(yearly)}`;
+}
+
+function renderPriceHistoryInModal() {
+  const el = els.priceHistory;
+  if (!el) return;
+  const s = editingId ? subs.find(x => x.id === editingId) : null;
+  if (!s || !s.priceHistory || s.priceHistory.length === 0) {
+    el.innerHTML = '';
+    el.style.display = 'none';
+    return;
+  }
+  const recent = s.priceHistory.slice().reverse().slice(0, 3);
+  el.style.display = '';
+  el.innerHTML = `
+    <div class="price-history-title">金額の変更履歴</div>
+    <ul class="price-history-list">
+      ${recent.map(p => `<li><span class="ph-date">${formatDate(p.date)}</span><span class="ph-amount">${yen(p.amount)}</span></li>`).join('')}
+      <li class="ph-current"><span class="ph-date">現在</span><span class="ph-amount">${yen(s.amount)}</span></li>
+    </ul>`;
 }
 
 function closeModal() {
@@ -847,7 +1002,7 @@ function closeModal() {
   previousFocus = null;
 }
 
-function saveSub(e) {
+async function saveSub(e) {
   e.preventDefault();
   const name    = els.fName.value.trim();
   const amount  = Number(els.fAmount.value);
@@ -858,14 +1013,39 @@ function saveSub(e) {
     return;
   }
 
+  const existing = editingId ? subs.find(s => s.id === editingId) : null;
+
   const trialRaw = els.fTrial.value;
   const trial    = /^\d{4}-\d{2}-\d{2}$/.test(trialRaw) ? trialRaw : null;
-  if (trial && trial < todayISO()) {
+  const trialChanged = !existing || existing.trialEndsAt !== trial;
+  if (trial && trialChanged && trial < todayISO()) {
     showToast('トライアル終了日は今日以降を指定してください');
     return;
   }
 
-  const existing   = editingId ? subs.find(s => s.id === editingId) : null;
+  const pausedRaw = els.fPause.value;
+  const paused    = /^\d{4}-\d{2}-\d{2}$/.test(pausedRaw) ? pausedRaw : null;
+
+  const urlRaw = els.fUrl.value.trim();
+  if (urlRaw && !sanitizeUrl(urlRaw)) {
+    showToast('URL は http:// または https:// で始めてください');
+    return;
+  }
+  const url = sanitizeUrl(urlRaw);
+
+  if (!existing) {
+    const normName = normalizeText(name);
+    const dup = subs.find(s => normalizeText(s.name) === normName);
+    if (dup) {
+      const ok = await showConfirm({
+        title:   '同じ名前のサブスクがあります',
+        text:    `既に「${dup.name}」が登録されています。それでも追加しますか？`,
+        okLabel: '追加する',
+      });
+      if (!ok) return;
+    }
+  }
+
   const renewalDay = parseYMD(renewal).getDate();
   // Re-anchor billingDay when the user edits the renewal date — the new day
   // becomes the canonical "billing day" so future cycles return to it after
@@ -873,6 +1053,14 @@ function saveSub(e) {
   const billingDay = (existing && existing.nextRenewal === renewal)
     ? existing.billingDay
     : renewalDay;
+
+  const priceHistory = existing ? existing.priceHistory.slice() : [];
+  if (existing && existing.amount !== amount) {
+    priceHistory.push({ date: todayISO(), amount: existing.amount });
+    if (priceHistory.length > MAX_PRICE_HISTORY) {
+      priceHistory.splice(0, priceHistory.length - MAX_PRICE_HISTORY);
+    }
+  }
 
   const sub = {
     id:          editingId || uid(),
@@ -885,6 +1073,9 @@ function saveSub(e) {
     memo:        els.fMemo.value.trim(),
     createdAt:   existing ? existing.createdAt : todayISO(),
     trialEndsAt: trial,
+    pausedUntil: paused,
+    url,
+    priceHistory,
   };
 
   if (editingId) {
@@ -941,10 +1132,34 @@ function showConfirm({ title = '確認', text = '', okLabel = 'OK', danger = fal
   });
 }
 
+// ── Resume paused sub ────────────────────
+function resumeSub(id) {
+  const s = subs.find(x => x.id === id);
+  if (!s || !s.pausedUntil) return;
+  const prevPaused = s.pausedUntil;
+  s.pausedUntil = null;
+  persist();
+  render();
+  showToast(`「${s.name}」を再開しました`, {
+    label: '取り消し',
+    action: () => {
+      const cur = subs.find(x => x.id === id);
+      if (!cur) return;
+      cur.pausedUntil = prevPaused;
+      persist();
+      render();
+    },
+  });
+}
+
 // ── Mark as paid ─────────────────────────
 function markPaid(id) {
   const s = subs.find(x => x.id === id);
   if (!s) return;
+  if (isPaused(s)) {
+    showToast('停止中は支払記録できません（先に再開してください）');
+    return;
+  }
   const prevDate = s.nextRenewal;
   const today    = todayISO();
   let next   = advanceCycle(prevDate, s.cycle, s.billingDay);
@@ -968,13 +1183,14 @@ function markPaid(id) {
 }
 
 // ── Delete ───────────────────────────────
-async function deleteSub(id) {
+async function deleteSub(id, asCancel = false) {
   const s = subs.find(x => x.id === id);
   if (!s) return;
+  const verb = asCancel ? '解約' : '削除';
   const ok = await showConfirm({
-    title:   '削除しますか？',
-    text:    `「${s.name}」を削除します。関連する評価履歴も一緒に削除されます。`,
-    okLabel: '削除',
+    title:   `${verb}しますか？`,
+    text:    `「${s.name}」を${verb}します。関連する評価履歴も一緒に${verb}されます。`,
+    okLabel: verb,
     danger:  true,
   });
   if (!ok) return;
@@ -990,7 +1206,7 @@ async function deleteSub(id) {
   }
   persist();
   render();
-  showToast(`「${s.name}」を削除しました`, { label: '取り消し', action: undoDelete });
+  showToast(`「${s.name}」を${verb}しました`, { label: '取り消し', action: undoDelete });
 }
 
 function undoDelete() {
@@ -1160,6 +1376,7 @@ function bindEvents() {
     if (btn.classList.contains('btn-edit'))   openModal(id);
     if (btn.classList.contains('btn-delete')) deleteSub(id);
     if (btn.classList.contains('btn-pay'))    markPaid(id);
+    if (btn.classList.contains('btn-resume')) resumeSub(id);
   });
 
   // Cancel candidate panel actions
@@ -1168,7 +1385,7 @@ function bindEvents() {
     if (!btn) return;
     const id = btn.dataset.id;
     if (btn.classList.contains('btn-edit'))   openModal(id);
-    if (btn.classList.contains('btn-delete')) deleteSub(id);
+    if (btn.classList.contains('btn-delete')) deleteSub(id, true);
   });
 
   // Evaluation tab actions
@@ -1180,7 +1397,7 @@ function bindEvents() {
     if (action === 'clear') clearRating(btn.dataset.sub, btn.dataset.period);
   });
 
-  // Search & filter
+  // Search & filter & sort
   els.search.addEventListener('input', e => {
     searchQuery = e.target.value;
     renderList();
@@ -1189,6 +1406,19 @@ function bindEvents() {
     filterCategory = e.target.value;
     renderList();
   });
+  els.sortBy.addEventListener('change', e => {
+    sortBy = e.target.value;
+    renderList();
+  });
+
+  // Live monthly equivalent in modal
+  els.fAmount.addEventListener('input', updateLiveEquiv);
+  els.fCycle.addEventListener('change', updateLiveEquiv);
+
+  // Theme toggle
+  const initialTheme = document.documentElement.getAttribute('data-theme') || 'dark';
+  els.btnTheme.textContent = initialTheme === 'dark' ? '🌙' : '☀️';
+  els.btnTheme.addEventListener('click', toggleTheme);
 
   // Export / Import
   els.btnExport.addEventListener('click', exportData);

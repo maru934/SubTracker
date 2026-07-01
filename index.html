@@ -1,10 +1,14 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html lang="ja" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SubTracker - サブスク管理</title>
   <link rel="stylesheet" href="style.css">
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f8fafc" media="(prefers-color-scheme: light)">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
 </head>
 <body>
 
@@ -64,6 +68,12 @@
           <option>クラウド</option>
           <option>その他</option>
         </select>
+        <select id="sort-by" aria-label="並び替え">
+          <option value="renewal">更新日順</option>
+          <option value="amount-desc">金額が高い順</option>
+          <option value="amount-asc">金額が安い順</option>
+          <option value="name">名前順</option>
+        </select>
       </div>
       <div id="sub-list" class="sub-list"></div>
       <div class="empty-state" id="empty-state">
@@ -102,6 +112,7 @@
   <footer class="app-footer">
     <button type="button" id="btn-export" class="btn-text">📤 エクスポート</button>
     <button type="button" id="btn-import" class="btn-text">📥 インポート</button>
+    <button type="button" id="btn-theme" class="btn-text" aria-label="テーマ切替" title="テーマ切替">🌙</button>
     <input type="file" id="file-import" accept="application/json" hidden>
   </footer>
 
@@ -131,6 +142,7 @@
             </select>
           </div>
         </div>
+        <div class="form-equiv" id="f-equiv" aria-live="polite"></div>
         <div class="form-row">
           <div class="form-group">
             <label for="f-category">カテゴリ</label>
@@ -148,14 +160,25 @@
             <input type="date" id="f-renewal" required>
           </div>
         </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="f-trial">無料トライアル終了日（任意）</label>
+            <input type="date" id="f-trial">
+          </div>
+          <div class="form-group">
+            <label for="f-pause">休止する（任意・この日まで停止）</label>
+            <input type="date" id="f-pause">
+          </div>
+        </div>
         <div class="form-group">
-          <label for="f-trial">無料トライアル終了日（任意）</label>
-          <input type="date" id="f-trial">
+          <label for="f-url">サービスURL（任意）</label>
+          <input type="url" id="f-url" placeholder="https://..." autocomplete="off" inputmode="url">
         </div>
         <div class="form-group">
           <label for="f-memo">メモ（任意）</label>
           <input type="text" id="f-memo" placeholder="解約は◯月◯日まで..." maxlength="120">
         </div>
+        <div id="price-history" class="price-history" style="display:none"></div>
         <div class="modal-actions">
           <button type="button" id="btn-cancel">キャンセル</button>
           <button type="submit" class="btn-save">保存</button>

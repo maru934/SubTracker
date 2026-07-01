@@ -1,0 +1,20 @@
+{
+  "name": "SubTracker - サブスク管理",
+  "short_name": "SubTracker",
+  "description": "サブスクリプションの支払いと利用度を管理するアプリ",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "lang": "ja",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
